@@ -39,7 +39,10 @@
 ======================================================================
 
 1. 把整个 steam-collection-skill 文件夹放到电脑上任意位置
-   (ZCode 用户可以放到  C:\Users\你的用户名\.zcode\skills\  目录下)
+   (也可以放到 AI 工具的技能目录里让它自动识别, Codex / Claude Code /
+    dsh / ZCode 的目录各不相同, 详见 README「安装到你的 AI 助手」一节;
+    文件夹名要改成 steam-collection。例如 ZCode 和 dsh 可以放:
+    C:\Users\你的用户名\.agents\skills\steam-collection\ )
 
 2. 对 AI 助手说(可以直接复制这句话):
 

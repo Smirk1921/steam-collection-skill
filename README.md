@@ -24,17 +24,72 @@ Steam 客户端。你只需要回答几个问题、做几次确认。
 1. **获取任务包**（任选其一）：
    - `git clone <仓库地址>` 后进入 `steam-collection-skill/`
    - 或下载仓库的 zip 并解压
-   - ZCode 用户：复制到用户级技能目录即可全局自动触发（目录名必须是
-     `steam-collection`，与 SKILL.md 里的 name 一致）：
-     `cp -r steam-collection-skill ~/.agents/skills/steam-collection`
-     放到 `~/.zcode/skills/steam-collection/` 同样有效且优先级更高，二者任选其一
-2. **交给 AI 助手**，例如：
-   - 直接对 agent 说：*"阅读 steam-collection-skill/SKILL.md，按里面的流程给我的 Steam 库分类"*
-   - ZCode 用户：说 *"/steam-collection 帮我给 Steam 库分类"*
-3. 按提示填写 `scripts/local_config.json`（从 `local_config.template.json` 复制），
+2. **安装到你的 AI 助手**：按下一节「安装到你的 AI 助手」把技能复制到对应目录
+   （不安装也行——把文件夹放在任意位置，让 AI 阅读里面的 SKILL.md 同样可以跑）
+3. **交给 AI 助手**，例如：
+   - 已按下一节安装：直接说 *"帮我给 Steam 库分类"*（自动触发），
+     或用 *"/steam-collection 帮我给 Steam 库分类"* 显式调用
+   - 未安装：说 *"阅读 steam-collection-skill/SKILL.md，按里面的流程给我的 Steam 库分类"*
+4. 按提示填写 `scripts/local_config.json`（从 `local_config.template.json` 复制），
    或者在对话里把信息告诉 agent 让它代填。
-4. 剩下的交给 agent。**每个步骤完成后它都会停下来向你汇报并等你确认**，你随时可以
+5. 剩下的交给 agent。**每个步骤完成后它都会停下来向你汇报并等你确认**，你随时可以
    提要求、纠错或叫停。
+
+## 安装到你的 AI 助手
+
+本任务包遵循通用 Agent Skills 约定（一个文件夹 + `SKILL.md`），下面四种常见工具都能直接用。
+安装方式相同、只是目录不同：**把 `steam-collection-skill/` 复制过去并重命名为
+`steam-collection`**（必须与 SKILL.md 里声明的 name 一致），然后在对话里描述需求即可，
+例如 *"帮我给 Steam 库分类"*、*"我 Steam 库加了新游戏，增量更新一下收藏集"*。
+下面的命令是 macOS / Linux / Git Bash 写法，Windows 用户用资源管理器手动复制到对应目录也一样。
+
+### 1. OpenAI Codex
+
+```bash
+cp -r steam-collection-skill ~/.codex/skills/steam-collection
+# Windows: C:\Users\<你的用户名>\.codex\skills\steam-collection\
+```
+
+- 作用范围：用户级（所有项目通用）；放到某个项目的 `.codex/skills/` 下则只对该项目生效
+- 触发：Codex 按技能描述自动加载；也可显式输入 `/use steam-collection`，或在对话里提及 `$steam-collection`
+- 装好后新开一个会话即可生效
+
+### 2. Claude Code（cc）
+
+```bash
+cp -r steam-collection-skill ~/.claude/skills/steam-collection
+# Windows: C:\Users\<你的用户名>\.claude\skills\steam-collection\
+```
+
+- 作用范围：用户级；项目级放该项目的 `.claude/skills/`
+- **注意：Claude Code 只在启动时加载技能，装好后需要重启 Claude Code**；用 `/skills` 可确认技能已出现
+- 触发：按技能描述自动匹配，直接提出需求即可
+
+### 3. dsh（DeepSeek Harness）
+
+```bash
+cp -r steam-collection-skill ~/.dsh/skills/steam-collection
+# 或者放到 ~/.agents/skills/steam-collection（dsh 与 ZCode 共用这一位置，两家都用只装一份）
+```
+
+- 作用范围：用户级；项目级放 `<项目>/.dsh/skills/` 或 `<项目>/.agents/skills/`
+- dsh 对技能目录是**实时监听**的，复制后无需重启
+- 还没装 dsh：`npm install -g @deepseek-ai/dsh`（需 Node.js ≥ 22.19），
+  运行 `dsh web` 打开网页界面，或 `dsh --profile headless "任务"`
+- 触发：按技能描述自动匹配，直接提出需求即可
+
+### 4. ZCode
+
+```bash
+cp -r steam-collection-skill ~/.agents/skills/steam-collection
+# 或优先级更高的 ZCode 专属位置：
+cp -r steam-collection-skill ~/.zcode/skills/steam-collection
+```
+
+- 作用范围：用户级；项目级放 `<项目>/.zcode/skills/`（优先级最高）
+- 触发：按技能描述自动匹配，也可用 `/steam-collection 帮我给 Steam 库分类` 显式调用
+
+> 小技巧：`~/.agents/skills` 是 dsh 和 ZCode 共同扫描的跨工具位置，两个工具都用的话装一份就够。
 
 ## 你需要准备什么
 

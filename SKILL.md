@@ -54,7 +54,7 @@ description: 全自动把用户的 Steam 游戏库分类为 Steam 收藏集并�
 | 方法 | 凭据 | 适用 |
 |---|---|---|
 | L1 Web API GetOwnedGames | API key + 账号"游戏详情"公开 | 最稳定，一次调用全量 |
-| L2 社区 games 页 | 匿名（详情公开）或 steamLoginSecure Cookie | 详情非公开时需 Cookie |
+| L2 社区 games 页 | 匿名（详情公开）或 steamLoginSecure Cookie | 详情非公开时需 Cookie；页面 2025/2026-11 两次改版，脚本已适配 |
 | L3 浏览器控制登录 | 用户手动登录一次 | **推荐的凭据获取方式**：Playwright 弹出系统 Edge/Chrome，用户登录（支持 Steam Guard），自动提取 Cookie 存本地配置 |
 | L4 许可页审计 | Cookie | 可选：全集审计找漏项（只出报告不进列表） |
 | 本地 manifest 扫描 | 无 | 安装状态 + 家庭共享残留检测 |
@@ -62,8 +62,15 @@ description: 全自动把用户的 Steam 游戏库分类为 Steam 收藏集并�
 执行：`python scripts/fetch_library.py`（配置见 `scripts/local_config.template.json`）。
 产出 `steam_library.csv` + diff 报告。
 
-**汇报内容**：来源方法、总款数、已安装数、与用户预期的差异（如用户知道有某游戏但列表没有）。
-**等待确认**。
+**两个必须遵守的点**：
+- **Cookie 有效期**：脚本启动会自动解析 `steamLoginSecure` 内嵌 JWT 的 exp，快过期/已过期
+  会打印警告。看到过期警告先跑 `--login`，不要让后续请求白跑。
+- **在线失败不许静默降级**：`--offline` 只能以上次列表为基准刷新安装状态，
+  **不含未安装的已购游戏**，不是完整库存。在线抓取失败时必须向用户说明这一点，
+  并引导其运行 `--login` 补齐完整列表，而不是直接拿离线结果进步骤2。
+
+**汇报内容**：来源方法（在线/浏览器登录/离线）、总款数、已安装数、与用户预期的差异
+（如用户知道有某游戏但列表没有）、以及是否包含未安装游戏。**等待确认**。
 
 ## 步骤 2：分类体系设计 + 预分类
 

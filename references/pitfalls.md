@@ -7,7 +7,11 @@
 | 问题 | 现象 | 解法 |
 |---|---|---|
 | 游戏详情隐私非公开 | 社区 games 页 302 到登录页；Web API 即使有 key 也返回 0 条 | 用 Cookie（浏览器控制登录提取 steamLoginSecure 是最顺滑的方式）；或建议用户把"游戏详情"改公开 |
-| 社区页改版 | 页面 200 且已登录但按旧正则抓到 0 条 | 2025 改版后 `rgGames` 没了，改用内嵌 React Query JSON 数据块解析（`"name"` 与 `"store_url_path":"app/<id>"` 紧邻配对）；两种结构都要兼容 |
+| 社区页改版 | 页面 200 且已登录但按旧正则抓到 0 条 | 2025 改版后 `rgGames` 没了，改用内嵌 React Query JSON；2026-11 再改版后要取 `"queryKey":["OwnedGames"` 的 `data` 数组（元素带 `family_shared`），两种旧结构保留为降级分支 |
+| Cookie 过期 | 社区 games 页 302 到登录页；新登录后仍提示非公开 | `fetch_library.py` 启动会自动解析 JWT `exp` 并预警（<7 天）。看到警告先 `--login`；登录时勾「记住我」，否则可能只有约 1 天有效期 |
+| 离线对账漏游戏 | `--offline` 只看到 2 款新增，实际有 45 款已购未安装 | 离线模式只刷新安装状态、不含未安装游戏；必须向用户说明并引导 `--login`，不能当完整列表进步骤2 |
+| 把缓存当所有权 | `librarycache` 目录有 2479 个 appid、真实库存约 1000 | librarycache / localconfig.vdf 不是所有权来源（后者还可能 gzip 压缩）；所有权只认 Web API 或社区页 |
+| 非可收藏内容混入 | 好友通行证（Friend's Pass）、Demo、试玩版进了分类表 | 脚本按名称自动过滤（Friend's Pass/好友通行证/Demo/试玩），也可在 `local_config.json` 的 `non_game_appids` 追加 |
 | 个人资料装饰品混入 | 解析出 appid 0 / 商城物品 | 过滤 appid 0；`store_url_path` 必须以 `app/` 开头；name 字符集排除 `\` 和 `"` 防跨嵌套误抓 |
 | Playwright goto 超时 | 打开社区页 45s 超时但网络正常 | 默认等 `load` 事件被慢资源卡死；改 `wait_until="domcontentloaded"` |
 | playwright 装不上 | pip 卡死无输出 | 国内环境：直连清华镜像 **不要套代理**（`pip install playwright -i https://pypi.tuna.tsinghua.edu.cn/simple`）；代理只需给浏览器/请求用 |
@@ -56,6 +60,7 @@
 | 标签列是数字 ID | steamcmd 的 store_tags 是 id，批次行不可读 | fetch-info 首次自动抓 populartags 生成 data/steam_tags_map.json 并转换；抓不到（需代理）时保留 ID，子代理按名称自行搜索 |
 | 移除的游戏还在收藏集里 | 退款/移除的款仍出现在 Steam 收藏集成员里 | 无害（Steam 忽略不存在的 appid）；要彻底清掉用 `apply --prune` |
 | 重复跑增量产生重复行 | 同一 appid 追加两次 | 不会：apply 按 appid 覆盖/追加去重；总表是唯一基准，不设独立 state 文件 |
+| 名称/标签误判视觉小说 | 动作游戏"影之刃零"被规则标成 C01 视觉小说，用户打回 | 新增款的 C 分类必须逐款核对，尤其 C01 视觉小说 / C03 Galgame 这类按名称或宽泛标签触发的；拿不准就搜索，不要凭名字猜。修正后用 `incremental.py detect <appid>` 强制重分类 |
 
 ## 通用
 

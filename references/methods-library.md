@@ -18,6 +18,34 @@
 2. 用户手动：浏览器登录 steamcommunity.com → F12 → 应用程序 → Cookie → 复制 `steamLoginSecure` 值
 3. 用户从已登录浏览器导出后粘贴给 agent
 
+## Cookie 有效期与 --login
+
+`steamLoginSecure` 的值形如 `<steamid64>||<JWT>`，JWT payload 里带 `exp`。
+`scripts/fetch_library.py` 启动时会自动解析，剩余不足 7 天或已过期会打印警告——
+看到警告就先跑 `--login`，不要等抓取失败再排查。
+
+实测教训：登录时**不勾「记住我」拿到的 Cookie 可能只有约 1 天有效期**。`--login` 的提示语
+已提醒用户勾选；脚本在提取成功后也会打印具体到期时间，有效期过短会再警告一次。
+Cookie 过期后的典型现象是：社区 games 页 302 到登录页，甚至新登录后仍被判定为非公开，
+所以过期预警比失败后的重试更省事。
+
+## 离线模式（--offline）的边界
+
+`--offline` 以上一次的 `steam_library.csv` 为所有权基准，只用本地 manifest 刷新安装状态：
+
+- **不含未安装的已购游戏**——这是它最大的坑。一次实战中，离线对账只发现 2 款新增，
+  实际还有 45 款早已购买但未安装的游戏；用户要求"补齐购买未安装的游戏"后重新登录才拿全。
+- 因此只能在明确告知用户"列表不完整"的前提下使用；汇报时必须带出来源和这一限制。
+- `librarycache`（`userdata/<id>/config/librarycache`）和 `localconfig.vdf` 都不是所有权
+  来源：前者实测 2479 个 appid 而真实库存约 1000，后者可能被 gzip 压缩，都不宜用来判断拥有关系。
+
+## 非可收藏内容的过滤
+
+好友通行证、Demo、试玩版会出现在所有权数组里，但不是可收藏游戏（旧版 rgGames 也不返回）。
+脚本按名称自动识别（`Friend's Pass` / `好友通行证` 任意位置；英文 `Demo`、中文 `试玩版`
+只认名称结尾，避免误伤 "Demo Builder" 这类正式游戏），并支持在 `local_config.json` 的
+`non_game_appids` 里追加 appid。跳过的条目会在报告里列出，不要让它们进入分类表。
+
 ## 合并规则
 
 ```
@@ -85,6 +113,23 @@ def parse_games(html):
 
 注意：新版页面里个人资料装饰品（Steam 点数商品）也有同名结构，`store_url_path` 以 `app/` 开头
 这一条件可以过滤掉绝大部分；appid 0 的条目丢弃。
+
+## 2026-11 再改版：React Query `OwnedGames`
+
+2026-11 起页面换成了单引号转义的 React Query 缓存，`store_url_path` 与 name 不再相邻
+（`store_url_path` 只剩在 StoreItem 查询里），上面的正则只能抓到零散条目。可靠做法是取
+`"queryKey":["OwnedGames"` 所在 state 的 `"data":[...]` 数组：
+
+- 数组元素形如 `{"appid":10,"name":"Counter-Strike","playtime_forever":83,...,"family_shared":false}`；
+- 必须跳过 `family_shared:true`（家庭共享不是本账号购买，旧版 rgGames 同样不返回）；
+- 解析前先 `html.replace('\"', '"')` 反转义，再用括号配对截取数组（不要regex整段）。
+- 同一元素还带 `playtime_forever`（总分钟数）与 `rtime_last_played`（最近游玩时间戳），
+  适合给步骤2 的 A 状态提案做依据（"正在玩"= 最近两周有记录等），但它们只代表游玩历史，
+  不代表用户想怎么分类，仍要向用户确认。
+
+`scripts/fetch_library.py` 的 `_json_array_before()` + `parse_games()` 已实现该结构，
+旧版与 2025 结构保留为降级分支。同一份页面还会返回 `mapPerfectUnownedGames`（已不拥有的游戏），
+不能当作所有权列表使用。
 
 ## 许可页审计（可选）
 

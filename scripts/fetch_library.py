@@ -4,15 +4,18 @@
 数据来源分层 (详见 references/methods-library.md):
   [本地] 注册表定位 Steam -> appmanifest_*.acf 扫描 -> 已安装集合 (唯一权威)
   [L1] Web API GetOwnedGames   需 key 且账号"游戏详情"公开
-  [L2] 社区 games 页            匿名(详情公开)或 steamLoginSecure Cookie; 兼容 2025 改版
-  [--login] 浏览器登录          Playwright 弹出系统浏览器, 用户手动登录后自动提取 Cookie
+  [L2] 社区 games 页            匿名(详情公开)或 steamLoginSecure Cookie; 兼容 2025 改版与
+                                2026-11 的 React Query OwnedGames 结构
+  [--login] 浏览器登录          Playwright 弹出系统浏览器, 用户手动登录后自动提取 Cookie;
+                                自动解析 JWT 有效期, 快过期会提前警告
   [--licenses] 许可页审计       需 Cookie, 只出报告不进列表
 
 用法:
   python fetch_library.py                # L1 失败自动降级 L2
   python fetch_library.py --login        # Cookie 缺失/过期时, 浏览器登录一次
   python fetch_library.py --licenses     # 额外许可页审计
-  python fetch_library.py --offline      # 断网: 以上次结果为基准仅刷新安装状态
+  python fetch_library.py --offline      # 断网应急: 以上次结果为基准仅刷新安装状态
+                                         # (不含未安装的已购游戏, 不是完整列表)
   python fetch_library.py --dry-run --no-proxy
 依赖: python3 + requests ; --login 另需 pip install playwright (浏览器用系统 Edge/Chrome)
 """
@@ -27,10 +30,15 @@ DIFF = os.path.join(OUT_DIR, "library_diff.txt")
 BAK = os.path.join(OUT_DIR, "backup")
 PROFILE = os.path.join(BASE, ".browser_profile")
 NOISE = {"228980"}   # Steamworks Common Redistributables 等系统组件
+# 非可收藏内容: 好友通行证/试玩版等 (旧版 rgGames 同样不返回)。规则只匹配明确形态:
+# Friend's Pass/好友通行证任意位置; 英文 Demo 只认名称结尾(避免误伤 "Demo Builder" 这类正式游戏);
+# 中文"试玩(版)"只认结尾。也可在 local_config.json 的 non_game_appids 里追加具体 appid。
+NON_GAME_PAT = re.compile(
+    r"(friend'?s?\s*pass|好友通行证|(?:^|[\s\-–—:：])demo(?:\s+version)?\s*$|试玩版?$)", re.I)
 
 def load_cfg():
     c = {"steamid32": "", "steamid64": "", "vanity": "", "steam_root": "", "proxy": "",
-         "steam_api_key": "", "steam_login_secure": ""}
+         "steam_api_key": "", "steam_login_secure": "", "non_game_appids": []}
     if os.path.exists(CFG):
         try: c.update({k: v for k, v in json.load(open(CFG, encoding="utf-8")).items() if k in c})
         except Exception as e: print("WARNING: 配置解析失败(%s), 用环境变量/空默认" % e)
@@ -57,6 +65,34 @@ def sid64(cfg):
     if cfg.get("steamid64"): return str(cfg["steamid64"])
     assert str(cfg.get("steamid32", "")).isdigit(), "配置缺少 steamid32/steamid64 (或环境变量)"
     return str(76561197960265728 + int(cfg["steamid32"]))
+
+def cookie_expiry(cookie):
+    """解析 steamLoginSecure 内嵌 JWT 的 exp。返回 (exp_ts, days_left) 或 None。
+    格式: <steamid64>||<JWT>; JWT payload 是 base64url(JSON), 含 exp。"""
+    if not cookie: return None
+    try:
+        import base64
+        from urllib.parse import unquote
+        v = unquote(str(cookie))
+        tok = v.split("||", 1)[1] if "||" in v else v
+        payload = tok.split(".")[0]
+        payload += "=" * (-len(payload) % 4)
+        d = json.loads(base64.urlsafe_b64decode(payload).decode("utf-8"))
+        exp = float(d.get("exp") or 0)
+        return (exp, (exp - time.time()) / 86400.0) if exp else None
+    except Exception:
+        return None
+
+def warn_cookie(cfg):
+    info = cookie_expiry(cfg.get("steam_login_secure"))
+    if not info: return
+    exp, days = info
+    when = time.strftime("%Y-%m-%d %H:%M", time.localtime(exp))
+    if days < 0:
+        print("WARNING: steamLoginSecure 已于 %s 过期, 在线抓取会失败; 请运行 --login 重新登录"
+              " (否则只能 --offline 仅对账安装状态)" % when)
+    elif days < 7:
+        print("WARNING: steamLoginSecure 将于 %s 过期(还剩 %.1f 天), 建议现在 --login 刷新" % (when, days))
 
 # ---------- 本地安装扫描 ----------
 
@@ -85,7 +121,8 @@ def scan_installed(root):
                 try: t = open(os.path.join(sa, fn), encoding="utf-8", errors="ignore").read()
                 except OSError: continue
                 m = re.search(r'"appid"\s+"(\d+)"', t)
-                if m: out[m.group(1)] = (re.search(r'"name"\s+"([^"]*)"', t) or [None, ""])[1] if re.search(r'"name"\s+"([^"]*)"', t) else ""
+                n = re.search(r'"name"\s+"([^"]*)"', t)
+                if m: out[m.group(1)] = n.group(1) if n else ""
     return out
 
 # ---------- 网络: 所有权 ----------
@@ -106,9 +143,42 @@ def fetch_api(cfg, no_proxy):
         except Exception: time.sleep(2 * (i + 1))
     return None, "API 请求失败(已重试)"
 
+def _json_array_before(text, pos):
+    """取 pos 之前最近 "data": 后第一个 JSON 数组(括号配对, 跳过字符串)并解析。"""
+    j = text.rfind('"data":', 0, pos)
+    if j < 0: return None
+    k = text.find('[', j, pos)
+    if k < 0: return None
+    depth, instr, esc = 0, False, False
+    for p in range(k, len(text)):
+        c = text[p]
+        if instr:
+            if esc: esc = False
+            elif c == '\\': esc = True
+            elif c == '"': instr = False
+        else:
+            if c == '"': instr = True
+            elif c == '[': depth += 1
+            elif c == ']':
+                depth -= 1
+                if depth == 0:
+                    try: return json.loads(text[k:p + 1])
+                    except Exception: return None
+    return None
+
 def parse_games(html):
-    """兼容旧版 rgGames 数组与 2025 改版内嵌 JSON 数据块 (见 methods-library.md)。"""
+    """兼容旧版 rgGames 数组、2025 改版与 2026-11 改版(React Query OwnedGames) (见 methods-library.md)。"""
     out = {}
+    # 2026-11: 数据在 React Query 缓存的 OwnedGames 数组里, 每条带 family_shared 标记;
+    # 家庭共享条目不是本账号购买, 与旧版 rgGames 行为保持一致地排除。
+    u = html.replace('\\"', '"')
+    for m in re.finditer(r'"queryKey":\["OwnedGames"', u):
+        for it in _json_array_before(u, m.start()) or []:
+            if not isinstance(it, dict): continue
+            a = str(it.get("appid") or ""); n = (it.get("name") or "").strip()
+            if not a or a == "0" or not n or it.get("family_shared"): continue
+            out[a] = n
+    if out: return out
     m = re.search(r'rgGames\s*=\s*\[(.*?)\]\s*;', html, re.S)
     if m:
         for blk in re.finditer(r'\{[^{}]*\}', m.group(1)):
@@ -174,7 +244,8 @@ def login_browser(cfg):
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         try: page.goto("https://steamcommunity.com/login/home/", timeout=90000, wait_until="domcontentloaded")
         except Exception as e: print("WARNING: 打开登录页异常(代理开着吗?): %s" % e)
-        print("请在弹出的浏览器窗口登录 Steam (支持 Steam Guard)。成功后自动继续, 请勿关闭窗口...")
+        print("请在弹出的浏览器窗口登录 Steam (支持 Steam Guard)。"
+              "建议勾选「记住我」以延长 Cookie 有效期。成功后自动继续, 请勿关闭窗口...")
         deadline = time.time() + 540
         while time.time() < deadline and not cookie:
             try:
@@ -186,6 +257,14 @@ def login_browser(cfg):
         if cookie:
             save_cfg("steam_login_secure", cookie)
             print("已提取 steamLoginSecure 并保存到 local_config.json")
+            info = cookie_expiry(cookie)
+            if info and info[1] > 0:
+                print("Cookie 有效期至 %s (剩 %.1f 天)" % (
+                    time.strftime("%Y-%m-%d %H:%M", time.localtime(info[0])), info[1]))
+                if info[1] < 7:
+                    print("WARNING: 有效期很短。登录时请勾选「记住我」, 否则下次运行前可能又要登录")
+            elif info:
+                print("WARNING: 新 Cookie 显示已过期, 请确认登录是否成功")
             try:
                 u = ("https://steamcommunity.com/id/%s/games/?tab=all" % cfg["vanity"]) if cfg.get("vanity") \
                     else "https://steamcommunity.com/profiles/%s/games/?tab=all" % sid64(cfg)
@@ -236,6 +315,8 @@ def main():
     cfg = load_cfg()
     dry = "--dry-run" in sys.argv; no_proxy = "--no-proxy" in sys.argv
     offline = "--offline" in sys.argv and "--login" not in sys.argv
+    if not offline and "--login" not in sys.argv:
+        warn_cookie(cfg)
     root = steam_root(cfg)
     inst = scan_installed(root)
     print("Steam 根目录: %s | 本地 manifest: %d" % (root or "(未找到)", len(inst)))
@@ -243,7 +324,9 @@ def main():
     if offline:
         own = {r["appid"]: r["name"] for r in old}
         if not own: print("ERROR: offline 需已有上次结果"); sys.exit(2)
-        src = "offline(上次结果)"
+        src = "offline(上次结果; 仅安装状态, 不含未安装游戏)"
+        print("WARNING: 离线模式只能对账安装状态; 未安装的已购游戏不会出现在列表里。"
+              "要完整列表请运行 --login 在线抓取。")
     else:
         if "--login" in sys.argv:
             cookie, own = login_browser(cfg)
@@ -267,9 +350,17 @@ def main():
                 src = "社区页(登录会话)"
             print("所有权: %d 条 (来源: %s)" % (len(own), src))
     extra = {a: n for a, n in inst.items() if a not in own and a not in NOISE}
+    extra_ids = set(cfg.get("non_game_appids") or [])
+    def is_non_game(a, n):
+        return a in extra_ids or bool(NON_GAME_PAT.search(n or ""))
+    skipped = sorted([a for a in own if is_non_game(a, own[a])], key=int)
     rows = [{"appid": a, "name": own[a] or inst.get(a, ""),
              "store_url": "https://store.steampowered.com/app/%s" % a,
-             "installed": "true" if a in inst else "false"} for a in sorted(own, key=int)]
+             "installed": "true" if a in inst else "false"}
+            for a in sorted(own, key=int) if not is_non_game(a, own.get(a, ""))]
+    if skipped:
+        print("跳过非可收藏内容(好友通行证/试玩): %s" % ", ".join(
+            "%s %s" % (a, own[a]) for a in skipped))
     oldmap = {r["appid"]: r for r in old}
     L = ["游戏列表刷新报告", "时间: %s" % time.strftime("%Y-%m-%d %H:%M:%S"), "来源: %s" % src,
          "旧 %d -> 新 %d (已安装 %d)" % (len(old), len(rows), sum(1 for r in rows if r["installed"] == "true")), "",

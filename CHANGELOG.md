@@ -1,5 +1,22 @@
 # 更新日志
 
+## v1.1.2 (2026-11-02)
+
+增量模式实战复盘：修复抓取与分类环节暴露的问题。
+
+- **社区页 2026-11 改版适配**：`fetch_library.py` 新增 `_json_array_before()`，从 React Query
+  缓存的 `"queryKey":["OwnedGames"` 解析完整所有权数组（支持多个数组块合并）；跳过
+  `family_shared:true`；旧版 rgGames 与 2025 结构保留为降级分支
+- **Cookie 有效期自检**：启动时解析 `steamLoginSecure` 内嵌 JWT 的 `exp`，<7 天或已过期时
+  打印警告；`--login` 成功后报告到期时间，并提示勾选「记住我」（实测不勾可能只有约 1 天）
+- **离线模式显式警示**：`--offline` 的报告与终端都会标注"仅安装状态、不含未安装游戏"，
+  SKILL.md 要求在线失败时必须告知用户并引导 `--login`，不能静默降级
+- **非可收藏内容过滤通用化**：去掉写死的用户专属 appid，改为名称规则
+  （Friend's Pass/好友通行证/Demo/试玩）+ `local_config.json` 的 `non_game_appids`
+- 文档：methods-library 增加 Cookie 有效期、离线边界、非可收藏内容、OwnedGames 游玩数据；
+  pitfalls 增加社区页再改版/Cookie 过期/离线漏游戏/缓存非所有权/非游戏混入/视觉小说误判；
+  incremental-guide 要求新增款逐款核对 C01/C03 并补充抓取阶段的坑
+
 ## v1.1.1 (2026-10-03)
 
 文档更新：使用说明不再局限于 ZCode。

@@ -105,6 +105,11 @@ description: 全自动把用户的 Steam 游戏库分类为 Steam 收藏集并�
 - **M3 搜索引擎子代理**：按批次派子代理逐款 WebSearch 核实玩法后修正分类
   （批处理协议、格式校验见 `references/methods-review.md`）
 
+**类目体检（建议在复核前做）**：`python scripts/overlap_check.py` 计算同一维度内两两类目的
+重叠（Jaccard）并对高重叠告警、同时给出"每款挂几个类"的分布。据此只对**高重叠的泛化类**
+做「准入 + 排除 + 锚点」收紧，避免"泛化类互相吸收、收藏集虚胖"。
+方法与真实成效见 `references/category-quality.md`。
+
 **子代理数量按用户情况增减**（并发上限、预算、时间要求、服务商稳定性），探测方法与
 调度参数决策表见 `references/methods-review.md`。默认策略：先双发探测上限，被拒即回落。
 
@@ -159,6 +164,7 @@ steam-collection-skill/
     methods-review.md          步骤3 标签来源与子代理批处理协议
     write-guide.md             步骤4 云存储格式与写入协议
     incremental-guide.md       增量模式：新增游戏只分类新增部分
+    category-quality.md        类目体检：重叠矩阵 + 准入/排除 + 锚点
     pitfalls.md                实战踩坑清单（遇到异常先查这里）
   scripts/
     local_config.template.json 配置模板（使用前复制为 local_config.json 并填写）
@@ -166,5 +172,6 @@ steam-collection-skill/
     build_collections.py       步骤4 收藏集 JSON 生成
     write_steam.py             步骤4 写入（守卫/备份/原子写）
     review_tools.py            步骤3 批次切分/汇总/回写工具
+    overlap_check.py           类目体检：两两类目重叠矩阵
     incremental.py             增量模式 detect/fetch-info/prepare/merge/apply
 ```
